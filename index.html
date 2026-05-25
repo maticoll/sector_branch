@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sector Breach - Search and Destroy</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="game-root"></div>
+
+    <div id="hud" style="--spread: 10px">
+      <div class="hud-top">
+        <div class="hud-card health">
+          <span>VIDA</span>
+          <strong id="health-text">100</strong>
+          <div class="bar"><i id="health-fill"></i></div>
+        </div>
+        <div class="hud-card armor">
+          <span>ARMADURA</span>
+          <strong id="armor-text">50</strong>
+        </div>
+        <div class="hud-card">
+          <span>ARMA</span>
+          <strong id="weapon-text">P-9</strong>
+        </div>
+        <div class="hud-card ammo">
+          <span>MUNICION</span>
+          <strong id="ammo-text">12 / 48</strong>
+        </div>
+        <div class="hud-card money">
+          <span>DINERO</span>
+          <strong id="money-text">$800</strong>
+        </div>
+        <div class="hud-card">
+          <span>RONDA</span>
+          <strong id="round-text">1</strong>
+        </div>
+        <div class="hud-card">
+          <span>EQUIPOS</span>
+          <strong id="alive-text">5v5</strong>
+        </div>
+        <div class="hud-card timer">
+          <span id="phase-label">MENU</span>
+          <strong id="timer-text">--</strong>
+        </div>
+      </div>
+
+      <canvas id="minimap" width="180" height="180" role="img" aria-label="Minimapa tactico"></canvas>
+
+      <div id="objective-panel">
+        <strong id="objective-title">Buscar y Destruir</strong>
+        <span id="objective-text">Planta la carga en A o B.</span>
+        <div class="progress-shell"><i id="objective-progress"></i></div>
+      </div>
+
+      <div id="crosshair" aria-hidden="true">
+        <span class="ch top"></span>
+        <span class="ch bottom"></span>
+        <span class="ch left"></span>
+        <span class="ch right"></span>
+        <span class="dot"></span>
+      </div>
+
+      <div id="hit-marker" aria-hidden="true">x</div>
+      <div id="headshot-marker" aria-hidden="true">HEADSHOT</div>
+      <div id="damage-vignette" aria-hidden="true"></div>
+      <div id="status-toast"></div>
+      <pre id="debug-panel" class="hidden"></pre>
+
+      <div id="buy-panel" class="side-panel hidden">
+        <p class="panel-kicker">FASE DE COMPRA</p>
+        <h2>Arsenal</h2>
+        <p class="hint">Compra con botones o teclas 1-6. Presiona B para alternar tienda.</p>
+        <div id="weapon-shop"></div>
+      </div>
+
+      <div id="scoreboard" class="scoreboard hidden">
+        <div>
+          <h3>Atacantes</h3>
+          <div id="attackers-list"></div>
+        </div>
+        <div>
+          <h3>Defensores</h3>
+          <div id="defenders-list"></div>
+        </div>
+        <p id="scoreboard-footer"></p>
+      </div>
+    </div>
+
+    <div id="start-screen" class="overlay">
+      <div class="briefing">
+        <p class="eyebrow">MODO ORIGINAL</p>
+        <h1>Sector Breach</h1>
+        <p class="summary">
+          Buscar y Destruir: entra con tu escuadra, planta la carga en A o B y defiendela.
+        </p>
+        <div class="instructions">
+          <span>Click para jugar</span>
+          <span>WASD moverse</span>
+          <span>Mouse mirar</span>
+          <span>Click disparar</span>
+          <span>R recargar</span>
+          <span>E plantar/recoger/desactivar</span>
+          <span>B tienda</span>
+          <span>TAB scoreboard</span>
+          <span>Shift caminar lento</span>
+          <span>Ctrl agacharse</span>
+          <span>F3 debug</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="round-screen" class="overlay hidden">
+      <div class="briefing compact">
+        <p class="eyebrow" id="round-kicker">RONDA</p>
+        <h2 id="round-title">Resultado</h2>
+        <p id="round-copy">Preparando siguiente ronda.</p>
+        <button id="next-round-button" type="button">Siguiente ronda</button>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
