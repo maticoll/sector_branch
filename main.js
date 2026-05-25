@@ -193,16 +193,29 @@ class AssetManager {
   constructor() {
     this.gltf = new GLTFLoader();
     this.draco = new DRACOLoader();
-    this.draco.setDecoderPath("https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/libs/draco/");
+    this.draco.setDecoderPath("./assets/draco/");
     this.gltf.setDRACOLoader(this.draco);
     this.rgbe = new RGBELoader();
     this.audio = new Map();
     this.models = new Map();
   }
 
-  loadModel(url, fallbackFactory, onReady) {
+  async loadModel(url, fallbackFactory, onReady) {
     if (!url) {
       console.warn("Model URL missing, using fallback.");
+      onReady(fallbackFactory());
+      return;
+    }
+    try {
+      const response = await fetch(url, { method: "HEAD" });
+      const type = response.headers.get("content-type") || "";
+      if (!response.ok || type.includes("text/html")) {
+        console.warn(`Model ${url} not found; using fallback.`);
+        onReady(fallbackFactory());
+        return;
+      }
+    } catch (error) {
+      console.warn(`Could not check model ${url}; using fallback.`, error);
       onReady(fallbackFactory());
       return;
     }
