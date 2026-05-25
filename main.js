@@ -468,6 +468,7 @@ class HUD {
     for (const item of this.shop.querySelectorAll(".shop-item")) {
       const key = item.dataset.weapon;
       item.classList.toggle("owned", key === state.weaponKey);
+      item.classList.toggle("equipped", state.slots.includes(key));
       item.disabled = state.money < WEAPONS[key].price && key !== state.weaponKey && !state.ownedWeapons.includes(key);
     }
   }
@@ -542,7 +543,7 @@ class InputManager {
       if (e.code === "KeyE") this.game.interactHeld = true;
       if (e.code === "Tab") this.scoreboard = true;
       if (e.code === "F3") this.game.debugVisible = !this.game.debugVisible;
-      if (/^Digit[1-6]$/.test(e.code)) this.game.handleWeaponHotkey(e.code.replace("Digit", ""));
+      if (/^Digit[1-2]$/.test(e.code)) this.game.handleWeaponHotkey(e.code.replace("Digit", ""));
     });
     window.addEventListener("keyup", (e) => {
       this.keys.delete(e.code);
@@ -565,6 +566,11 @@ class InputManager {
       this.mouseDown = true;
       if (this.isPointerLocked) this.game.weapons.triggerDown();
     });
+    document.addEventListener("wheel", (e) => {
+      if (!this.isPointerLocked) return;
+      e.preventDefault();
+      this.game.weapons.cycle(e.deltaY > 0 ? 1 : -1);
+    }, { passive: false });
     document.addEventListener("mouseup", () => {
       this.mouseDown = false;
       this.game.weapons.triggerUp();
@@ -712,6 +718,8 @@ class WeaponManager {
     this.game = game;
     this.currentKey = "pistol";
     this.current = WEAPONS.pistol;
+    this.slots = ["pistol", null];
+    this.activeSlot = 0;
     this.inventory = {};
     this.triggerHeld = false;
     this.lastShot = -99;
@@ -723,10 +731,14 @@ class WeaponManager {
     this.model = new THREE.Group();
     this.game.camera.add(this.model);
     this.resetInventory();
-    this.loadWeaponModel("pistol");
   }
   resetInventory() {
     Object.values(WEAPONS).forEach((w) => this.inventory[w.key] = { ammo: w.magazineSize, reserve: w.magazineSize * w.reserveMags });
+    this.slots = ["pistol", null];
+    this.activeSlot = 0;
+    this.currentKey = "pistol";
+    this.current = WEAPONS.pistol;
+    this.loadWeaponModel("pistol");
   }
   loadWeaponModel(key) {
     const w = WEAPONS[key];
@@ -740,13 +752,29 @@ class WeaponManager {
     });
   }
   switchTo(key) {
-    if (!this.game.economy.ownedWeapons.has(key)) return false;
-    this.currentKey = key; this.current = WEAPONS[key]; this.isReloading = false; this.reloadTimer = 0; this.loadWeaponModel(key); this.game.hud.toastMessage(this.current.name, 650); return true;
+    const slotIndex = this.slots.indexOf(key);
+    if (slotIndex === -1) return false;
+    this.activeSlot = slotIndex;
+    this.currentKey = key; this.current = WEAPONS[key]; this.isReloading = false; this.reloadTimer = 0; this.loadWeaponModel(key); this.game.hud.toastMessage(`${slotIndex + 1}. ${this.current.name}`, 650); return true;
+  }
+  switchSlot(slotIndex) {
+    const key = this.slots[slotIndex];
+    if (!key) { this.game.hud.toastMessage(`Slot ${slotIndex + 1} vacio`, 550); return false; }
+    return this.switchTo(key);
+  }
+  cycle(direction = 1) {
+    const available = this.slots.map((key, index) => key ? index : -1).filter((index) => index >= 0);
+    if (available.length < 2) return false;
+    const pos = available.indexOf(this.activeSlot);
+    const next = available[(pos + direction + available.length) % available.length];
+    return this.switchSlot(next);
   }
   buyOrSwitch(key) {
     if (!WEAPONS[key]) return;
     if (!this.game.economy.buy(key)) { this.game.hud.toastMessage("Dinero insuficiente"); this.game.audio.event("empty"); return; }
-    this.switchTo(key);
+    const slot = key === "pistol" ? 0 : 1;
+    this.slots[slot] = key;
+    this.switchSlot(slot);
   }
   triggerDown() { this.triggerHeld = true; this.tryShoot(); }
   triggerUp() { this.triggerHeld = false; }
@@ -872,10 +900,11 @@ class Bot {
     this.team = opts.team;
     this.position = opts.position.clone();
     this.targetSite = opts.targetSite || "A";
-    this.health = 100; this.armor = 35; this.alive = true; this.kills = 0; this.radius = 0.42; this.state = opts.state || BotState.SPAWN; this.weapon = opts.weapon || WEAPONS.rifle; this.lastShot = -99; this.shootCooldown = rand(0.4, 1.2); this.reactTimer = rand(0.5, 1.0); this.walkTime = rand(0, 10); this.flashTimer = 0; this.detectedTimer = 0; this.planting = 0; this.defusing = 0;
+    this.health = 100; this.armor = 35; this.alive = true; this.kills = 0; this.radius = 0.42; this.state = opts.state || BotState.SPAWN; this.weapon = opts.weapon || WEAPONS.rifle; this.lastShot = -99; this.shootCooldown = rand(0.8, 1.8); this.reactTimer = rand(0.8, 1.4); this.walkTime = rand(0, 10); this.flashTimer = 0; this.detectedTimer = 0; this.planting = 0; this.defusing = 0; this.visionRange = opts.visionRange || (this.team === TEAM.DEFENDERS ? 13 : 15); this.scanTimer = rand(0, 0.2); this.targetMemory = null;
     this.group = new THREE.Group(); this.group.position.copy(this.position); game.scene.add(this.group);
     this.modelRoot = null; this.hitBoxes = []; this.muzzleFlash = null; this.healthBar = null;
     this.createModel();
+    if (opts.lookAt) this.lookAt(opts.lookAt);
   }
   createModel() {
     const url = this.team === TEAM.ATTACKERS ? ASSET_PATHS.characters.ally : ASSET_PATHS.characters.enemy;
@@ -911,7 +940,12 @@ class Bot {
       if (la) la.rotation.x = gait * 3; if (ra) ra.rotation.x = -gait * 3;
       if (ll) ll.rotation.x = -gait * 2.2; if (rl) rl.rotation.x = gait * 2.2;
     }
-    const enemy = this.findTarget();
+    this.scanTimer -= dt;
+    if (this.scanTimer <= 0) {
+      this.targetMemory = this.findTarget();
+      this.scanTimer = rand(0.18, 0.32);
+    }
+    const enemy = this.targetMemory?.alive ? this.targetMemory : null;
     if (enemy) {
       this.detectedTimer = 3;
       this.state = BotState.ENGAGE_ENEMY;
@@ -953,7 +987,7 @@ class Bot {
   }
   findTarget() {
     const candidates = this.team === TEAM.ATTACKERS ? this.game.teams.defenders.members : this.game.teams.attackers.members;
-    let best = null, bestDist = 17;
+    let best = null, bestDist = this.visionRange;
     for (const e of candidates) {
       if (!e.alive) continue;
       const d = this.position.distanceTo(e.position);
@@ -964,14 +998,14 @@ class Bot {
   tryShoot(target, dt) {
     this.shootCooldown -= dt;
     if (this.shootCooldown > 0) return;
-    this.shootCooldown = rand(0.18, 0.35);
-    if (Math.random() < 0.35) this.shootCooldown += rand(0.8, 1.5);
+    this.shootCooldown = rand(0.55, 1.05);
+    if (Math.random() < 0.45) this.shootCooldown += rand(0.9, 1.8);
     this.flashTimer = 0.07;
     this.game.audio.gun(this.weapon);
     const origin = this.position.clone().setY(1.25);
     const aim = target.position.clone().setY(1.25);
-    const err = this.team === TEAM.ATTACKERS ? 0.75 : 0.95;
-    aim.x += rand(-err, err); aim.y += rand(-0.35, 0.55); aim.z += rand(-err, err);
+    const err = this.team === TEAM.ATTACKERS ? 0.95 : 1.45;
+    aim.x += rand(-err, err); aim.y += rand(-0.45, 0.75); aim.z += rand(-err, err);
     const dir = aim.sub(origin).normalize();
     this.game.fireRay(this, this.weapon, origin, dir, this.weapon.baseSpread + 0.025);
   }
@@ -1278,10 +1312,10 @@ class MapManager {
 }
 
 class RoundManager {
-  constructor(game) { this.game = game; this.state = RoundState.MENU; this.round = 0; this.attackWins = 0; this.defenseWins = 0; this.timer = 0; this.buyTime = 10; this.roundTime = 120; this.endLock = false; }
+  constructor(game) { this.game = game; this.state = RoundState.MENU; this.round = 0; this.attackWins = 0; this.defenseWins = 0; this.timer = 0; this.buyTime = 18; this.roundTime = 120; this.endLock = false; }
   startFirstRound() { if (this.state === RoundState.MENU) this.nextRound(); }
   nextRound() {
-    this.round++; this.endLock = false; this.state = RoundState.BUY_PHASE; this.timer = this.buyTime; this.game.setupRound(); this.game.hud.hideRoundScreen(); this.game.hud.setBuyVisible(true); this.game.hud.toastMessage("Compra armas"); this.game.audio.event("round");
+    this.round++; this.endLock = false; this.state = RoundState.BUY_PHASE; this.timer = this.buyTime; this.game.setupRound(); this.game.hud.hideRoundScreen(); this.game.hud.setBuyVisible(true); this.game.hud.toastMessage("Fase de compra"); this.game.audio.event("round");
   }
   update(dt) {
     if (![RoundState.BUY_PHASE, RoundState.PLAYING, RoundState.BOMB_PLANTED].includes(this.state)) return;
@@ -1329,7 +1363,7 @@ class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.1, 90);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8)); this.renderer.setSize(innerWidth, innerHeight);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.35)); this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1; this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setClearColor(0x08100e, 1);
     this.root.appendChild(this.renderer.domElement);
@@ -1381,26 +1415,48 @@ class Game {
     this.weapons.resetInventory();
     this.clearTeams();
     this.teams.attackers.members.push(this.player);
-    const allyFormation = [[-2.8, 7.2], [2.8, 7.2], [-5.4, 5.0], [5.4, 5.0]];
-    for (let i = 0; i < 4; i++) {
-      const desired = attackerSpawn.clone().setY(0).add(new THREE.Vector3(allyFormation[i][0],0,allyFormation[i][1]));
-      this.teams.attackers.members.push(new Bot(this, { id:`a${i}`, name:`Ally ${i+1}`, team:TEAM.ATTACKERS, position:this.safeSpawn(desired, 0.7), targetSite:i%2?"B":"A", weapon:WEAPONS.smg, state:BotState.FOLLOW_PLAYER }));
-    }
-    for (let i = 0; i < 5; i++) {
-      const desired = defenderSpawn.clone().add(new THREE.Vector3(rand(-3,3),0,rand(-3,3)));
-      this.teams.defenders.members.push(new Bot(this, { id:`d${i}`, name:`Guard ${i+1}`, team:TEAM.DEFENDERS, position:this.safeSpawn(desired, 0.7), targetSite:i<3?"A":"B", weapon:WEAPONS.rifle, state:BotState.HOLD_POSITION }));
-    }
+    const center = new THREE.Vector3(0, 0, 0);
+    const occupied = [attackerSpawn.clone().setY(0)];
+    const allies = this.spawnFormation(attackerSpawn, 4, 2.4, center, occupied);
+    allies.forEach((position, i) => {
+      this.teams.attackers.members.push(new Bot(this, { id:`a${i}`, name:`Ally ${i+1}`, team:TEAM.ATTACKERS, position, lookAt:center, targetSite:i%2?"B":"A", weapon:WEAPONS.smg, state:BotState.HOLD_POSITION, visionRange:14 }));
+    });
+    const defenderOccupied = [];
+    const defenders = this.spawnFormation(defenderSpawn, 5, 2.35, center, defenderOccupied);
+    defenders.forEach((position, i) => {
+      this.teams.defenders.members.push(new Bot(this, { id:`d${i}`, name:`Guard ${i+1}`, team:TEAM.DEFENDERS, position, lookAt:center, targetSite:i<3?"A":"B", weapon:WEAPONS.rifle, state:BotState.HOLD_POSITION, visionRange:12.5 }));
+    });
     this.bomb.reset(this.player);
   }
-  safeSpawn(origin, radius = 0.7) {
+  spawnFormation(origin, count, spacing, faceTarget, occupied = []) {
     const base = origin.clone().setY(0);
-    const candidates = [[0,0],[0,3],[3,0],[-3,0],[0,-3],[3,3],[-3,3],[3,-3],[-3,-3],[0,6],[6,0],[-6,0],[0,-6],[6,6],[-6,6],[6,-6],[-6,-6]];
+    const forward = faceTarget.clone().setY(0).sub(base);
+    if (forward.lengthSq() < 0.01) forward.set(0, 0, -1);
+    forward.normalize();
+    const right = new THREE.Vector3(forward.z, 0, -forward.x);
+    const pattern = [[-1,1],[1,1],[-2,2],[2,2],[0,2.6],[-1.5,3.2],[1.5,3.2]];
+    const result = [];
+    for (let i = 0; i < count; i++) {
+      const [rx, fz] = pattern[i % pattern.length];
+      const desired = base.clone()
+        .addScaledVector(right, rx * spacing)
+        .addScaledVector(forward, fz * spacing);
+      const point = this.safeSpawn(desired, 0.7, occupied);
+      occupied.push(point.clone());
+      result.push(point);
+    }
+    return result;
+  }
+  safeSpawn(origin, radius = 0.7, occupied = []) {
+    const base = origin.clone().setY(0);
+    const candidates = [[0,0],[0,2.4],[2.4,0],[-2.4,0],[0,-2.4],[2.4,2.4],[-2.4,2.4],[2.4,-2.4],[-2.4,-2.4],[0,4.8],[4.8,0],[-4.8,0],[0,-4.8],[4.8,4.8],[-4.8,4.8],[4.8,-4.8],[-4.8,-4.8]];
     const b = this.map.current.bounds;
     for (const [dx, dz] of candidates) {
       const p = base.clone().add(new THREE.Vector3(dx, 0, dz));
       p.x = clamp(p.x, b.minX + 1.4, b.maxX - 1.4);
       p.z = clamp(p.z, b.minZ + 1.4, b.maxZ - 1.4);
-      if (!this.collision.collides(p.clone().setY(1.65), radius)) return p;
+      const clearOfActors = occupied.every((other) => other.clone().setY(0).distanceTo(p) >= radius * 2.4);
+      if (clearOfActors && !this.collision.collides(p.clone().setY(1.65), radius)) return p;
     }
     console.warn("No clear spawn found near", origin);
     return base;
@@ -1410,7 +1466,14 @@ class Game {
     this.teams = { attackers: { name: "Atacantes", members: [] }, defenders: { name: "Defensores", members: [] } };
   }
   toggleBuyPanel() { if (this.round.state === RoundState.BUY_PHASE) this.hud.setBuyVisible(this.hud.buyPanel.classList.contains("hidden")); }
-  handleWeaponHotkey(slot) { const w = Object.values(WEAPONS).find((x) => x.slot === slot); if (!w) return; if (this.round.state === RoundState.BUY_PHASE) this.weapons.buyOrSwitch(w.key); else this.weapons.switchTo(w.key); }
+  handleWeaponHotkey(slot) {
+    const slotIndex = Number(slot) - 1;
+    if (this.round.state === RoundState.BUY_PHASE) {
+      this.weapons.switchSlot(slotIndex);
+      return;
+    }
+    this.weapons.switchSlot(slotIndex);
+  }
   alive(team) { return this.teams[team].members.filter((m) => m.alive).length; }
   getCameraWorldPosition() { this.camera.updateMatrixWorld(true); return this.camera.getWorldPosition(new THREE.Vector3()); }
   hasLineOfSight(from, to) { const dir = to.clone().sub(from); const dist = dir.length(); dir.normalize(); return !this.collision.raycast(from, dir, dist - 0.2); }
@@ -1525,6 +1588,10 @@ class Game {
     if (this.round.state === RoundState.MENU) {
       text = "Click para jugar. Compra, avanza con tu escuadra y planta la carga.";
       prog = 0;
+    } else if (this.round.state === RoundState.BUY_PHASE) {
+      title = "Fase de compra";
+      text = "Elegi armas. 1 y 2 cambian slot, rueda alterna entre armas equipadas.";
+      prog = 1 - (this.round.timer / this.round.buyTime);
     } else if (bomb.state === BombState.CARRIED) text = bomb.carrier === this.player ? "Llevas la carga. Mantén E en A o B para plantar." : `${bomb.carrier?.name || "Aliado"} lleva la carga.`;
     if (bomb.state === BombState.DROPPED) text = "Carga en el suelo. Acercate y presiona E para recogerla.";
     if (bomb.state === BombState.PLANTING) { title = "Plantando"; text = "Mantén E para completar la planta."; prog = bomb.plantProgress / 3; }
@@ -1539,7 +1606,7 @@ class Game {
       [RoundState.ROUND_WIN_DEFENDERS]: "DEFENSORES",
       [RoundState.GAME_OVER]: "FINAL",
     };
-    this.hud.update({ health:this.player.health, armor:this.player.armor, weaponName:this.weapons.current.name, weaponKey:this.weapons.currentKey, ammo:clip.ammo, reserve:clip.reserve, money:this.economy.money, ownedWeapons:[...this.economy.ownedWeapons], round:this.round.round || 1, attackersAlive:this.alive(TEAM.ATTACKERS), defendersAlive:this.alive(TEAM.DEFENDERS), phaseLabel:phaseLabels[this.round.state] || this.round.state, timer:[RoundState.MENU].includes(this.round.state)?"--":Math.max(0,Math.ceil(this.round.state===RoundState.BOMB_PLANTED?bomb.timeToExplosion:this.round.timer)), objectiveTitle:title, objectiveText:text, objectiveProgress:prog, crosshairSpread:this.weapons.getCrosshairSpread() });
+    this.hud.update({ health:this.player.health, armor:this.player.armor, weaponName:`${this.weapons.activeSlot + 1}. ${this.weapons.current.name}`, weaponKey:this.weapons.currentKey, slots:this.weapons.slots, ammo:clip.ammo, reserve:clip.reserve, money:this.economy.money, ownedWeapons:[...this.economy.ownedWeapons], round:this.round.round || 1, attackersAlive:this.alive(TEAM.ATTACKERS), defendersAlive:this.alive(TEAM.DEFENDERS), phaseLabel:phaseLabels[this.round.state] || this.round.state, timer:[RoundState.MENU].includes(this.round.state)?"--":Math.max(0,Math.ceil(this.round.state===RoundState.BOMB_PLANTED?bomb.timeToExplosion:this.round.timer)), objectiveTitle:title, objectiveText:text, objectiveProgress:prog, crosshairSpread:this.weapons.getCrosshairSpread() });
     this.hud.updateScoreboard(this, this.input.scoreboard);
     this.hud.updateDebug([`map ${this.map.current.name}`,`pos ${this.player.position.x.toFixed(2)}, ${this.player.position.y.toFixed(2)}, ${this.player.position.z.toFixed(2)}`,`yaw ${this.player.yawObject.rotation.y.toFixed(3)} pitch ${this.player.pitchObject.rotation.x.toFixed(3)}`,`pointer ${this.input.isPointerLocked}`,`speed ${this.player.speed.toFixed(2)}`,`state ${this.round.state}`,`bomb ${this.bomb.state}`,`colliders ${this.collision.colliders.length}`].join("\n"), this.debugVisible);
   }
@@ -1547,7 +1614,10 @@ class Game {
     requestAnimationFrame(()=>this.animate());
     const dt = Math.min(this.clock.getDelta(),0.04);
     this.round.update(dt);
-    if ([RoundState.BUY_PHASE,RoundState.PLAYING,RoundState.BOMB_PLANTED].includes(this.round.state)) {
+    if (this.round.state === RoundState.BUY_PHASE) {
+      this.weapons.update(dt);
+    }
+    if ([RoundState.PLAYING,RoundState.BOMB_PLANTED].includes(this.round.state)) {
       this.bomb.beginActionFrame();
       this.player.update(dt,this.input.movement,this.collision); this.audio.footsteps(dt,this.player.speed,this.player.crouching); this.weapons.update(dt); this.interact(dt);
       [...this.teams.attackers.members,...this.teams.defenders.members].forEach((m)=>{ if(m instanceof Bot)m.update(dt); });
