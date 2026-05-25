@@ -7,6 +7,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const USE_OPTIONAL_ASSET_FILES = false;
+const MAX_TRACERS = 24;
+const MAX_PARTICLES = 80;
+const MAX_IMPACTS = 36;
 
 const RoundState = {
   MENU: "MENU",
@@ -193,10 +196,40 @@ function ribbedTexture(color = "#53646a") {
 function makeStdMaterial(color, options = {}) {
   return new THREE.MeshStandardMaterial({
     color,
+    map: options.map ?? null,
     roughness: options.roughness ?? 0.68,
     metalness: options.metalness ?? 0.08,
     emissive: options.emissive ?? 0x000000,
     emissiveIntensity: options.emissiveIntensity ?? 0,
+  });
+}
+
+function weaponSkinTexture(type) {
+  const palettes = {
+    pistol: ["#1a1d1c", "#b7c3bd", "#d96f42", "#2c3935"],
+    smg: ["#10191b", "#19a7a1", "#d5edf0", "#394b51"],
+    rifle: ["#151716", "#44563f", "#9b8f59", "#262c25"],
+    sniper: ["#111315", "#7467c9", "#d6d1ff", "#3a334e"],
+    shotgun: ["#191513", "#8a4d32", "#d0b17a", "#2d2420"],
+  }[type] || ["#151716", "#53646a", "#d8e0d0", "#252a28"];
+  return makeTexture(256, (ctx, w, h) => {
+    ctx.fillStyle = palettes[0]; ctx.fillRect(0, 0, w, h);
+    for (let i = 0; i < 18; i++) {
+      ctx.fillStyle = palettes[i % palettes.length];
+      ctx.globalAlpha = i % 3 === 0 ? 0.5 : 0.32;
+      ctx.beginPath();
+      ctx.ellipse(rand(0, w), rand(0, h), rand(18, 54), rand(5, 18), rand(-0.8, 0.8), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.16)";
+    ctx.lineWidth = 3;
+    for (let x = -w; x < w * 2; x += 46) {
+      ctx.beginPath(); ctx.moveTo(x, h); ctx.lineTo(x + w * 0.7, 0); ctx.stroke();
+    }
+    ctx.strokeStyle = "rgba(0,0,0,0.36)";
+    ctx.lineWidth = 8;
+    ctx.strokeRect(8, 8, w - 16, h - 16);
   });
 }
 
@@ -221,6 +254,26 @@ function addDetailLines(parent, mesh, color = 0x101412, opacity = 0.45) {
   edges.scale.copy(mesh.scale);
   parent.add(edges);
   return edges;
+}
+
+function disposeMaterial(material) {
+  if (!material) return;
+  const materials = Array.isArray(material) ? material : [material];
+  for (const mat of materials) {
+    for (const value of Object.values(mat)) {
+      if (value?.isTexture) value.dispose();
+    }
+    mat.dispose?.();
+  }
+}
+
+function disposeObject3D(root) {
+  if (!root) return;
+  root.traverse?.((node) => {
+    node.geometry?.dispose?.();
+    disposeMaterial(node.material);
+  });
+  root.parent?.remove(root);
 }
 
 function makeCanvasSprite(text, options = {}) {
@@ -643,7 +696,9 @@ class EconomyManager {
 
 function createWeaponFallback(type) {
   const g = new THREE.Group();
-  const gunmetal = makeStdMaterial(0x171d1f, { roughness: 0.42, metalness: 0.66 });
+  const skinMap = weaponSkinTexture(type);
+  skinMap.repeat.set(1.8, 1);
+  const gunmetal = makeStdMaterial(0x171d1f, { map: skinMap, roughness: 0.42, metalness: 0.66 });
   const polymer = makeStdMaterial(type === "shotgun" ? 0x4a3426 : 0x242a27, { roughness: 0.72, metalness: 0.12 });
   const detail = makeStdMaterial(0x8f9d8e, { roughness: 0.5, metalness: 0.42 });
   const rubber = makeStdMaterial(0x080b0c, { roughness: 0.86, metalness: 0.02 });
@@ -750,7 +805,7 @@ class WeaponManager {
   }
   loadWeaponModel(key) {
     const w = WEAPONS[key];
-    this.model.clear();
+    while (this.model.children.length) disposeObject3D(this.model.children[0]);
     this.game.assets.loadModel(w.modelUrl, () => createWeaponFallback(w.type), (model) => {
       model.scale.setScalar(0.78);
       model.position.set(0.32, -0.34, -0.72);
@@ -1156,8 +1211,9 @@ class MapManager {
     this.build();
   }
   build() {
-    this.mapRoot.clear(); this.coverPoints = []; this.game.collision.clear();
-    if (this.sky) this.game.scene.remove(this.sky);
+    while (this.mapRoot.children.length) disposeObject3D(this.mapRoot.children[0]);
+    this.coverPoints = []; this.game.collision.clear();
+    if (this.sky) { disposeObject3D(this.sky); this.sky = null; }
     this.game.scene.background = new THREE.Color(this.current.theme === "desert" ? 0xbda375 : 0x0b1210);
     this.game.scene.fog = new THREE.Fog(this.current.theme === "desert" ? 0xbda375 : 0x0b1210, 20, 68);
     this.sky = this.createSky();
@@ -1284,7 +1340,9 @@ class MapManager {
   }
   box(x,y,z,w,h,d,mat,collide=true,name="box") {
     const m = addMesh(this.mapRoot, new THREE.BoxGeometry(w,h,d), mat, [x,y,z], [0,0,0], name);
-    addDetailLines(this.mapRoot, m, 0x070908, name === "floor" ? 0.08 : 0.22);
+    if (!["floor", "mainLane", "serviceLane", "floorGridX", "floorGridZ", "laneMark", "laneMarkBlue", "containerRib", "siteSignPost", "lightPole", "lamp", "mast", "mastCross"].includes(name)) {
+      addDetailLines(this.mapRoot, m, 0x070908, 0.22);
+    }
     if (collide) this.game.collision.addBox(x,y,z,w,h,d); return m;
   }
   cylinder(x,y,z,r,h,mat,collide=false,name="cylinder",rotation=[0,0,0]) {
@@ -1377,7 +1435,7 @@ class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(74, innerWidth / innerHeight, 0.1, 90);
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.35)); this.renderer.setSize(innerWidth, innerHeight);
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.15)); this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1; this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.setClearColor(0x08100e, 1);
     this.root.appendChild(this.renderer.domElement);
@@ -1410,7 +1468,7 @@ class Game {
     const sun = new THREE.DirectionalLight(0xf1ead3, 2.4);
     sun.position.set(-10,20,12);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048,2048);
+    sun.shadow.mapSize.set(1024,1024);
     sun.shadow.camera.left=-34; sun.shadow.camera.right=34; sun.shadow.camera.top=34; sun.shadow.camera.bottom=-34; sun.shadow.camera.near=1; sun.shadow.camera.far=70;
     this.scene.add(sun);
     const coolFill = new THREE.DirectionalLight(0x72b9c8, 0.45);
@@ -1422,6 +1480,7 @@ class Game {
     const lock = this.renderer.domElement.requestPointerLock?.() || document.body.requestPointerLock?.(); if (lock?.catch) lock.catch(() => {});
   }
   setupRound() {
+    this.clearTransientEffects();
     this.map.nextMap();
     const attackerSpawn = this.safeSpawn(this.map.current.attackerSpawn, 1.1).setY(this.player.height);
     const defenderSpawn = this.safeSpawn(this.map.current.defenderSpawn, 1.1).setY(0);
@@ -1476,8 +1535,12 @@ class Game {
     return base;
   }
   clearTeams() {
-    [...(this.teams.attackers?.members || []), ...(this.teams.defenders?.members || [])].forEach((m) => { if (m instanceof Bot) this.scene.remove(m.group); });
+    [...(this.teams.attackers?.members || []), ...(this.teams.defenders?.members || [])].forEach((m) => { if (m instanceof Bot) disposeObject3D(m.group); });
     this.teams = { attackers: { name: "Atacantes", members: [] }, defenders: { name: "Defensores", members: [] } };
+  }
+  clearTransientEffects() {
+    [...this.tracers, ...this.particles, ...this.impacts].forEach((obj) => disposeObject3D(obj));
+    this.tracers = []; this.particles = []; this.impacts = [];
   }
   toggleBuyPanel() { if (this.round.state === RoundState.BUY_PHASE) this.hud.setBuyVisible(this.hud.buyPanel.classList.contains("hidden")); }
   handleWeaponHotkey(slot) {
@@ -1555,6 +1618,7 @@ class Game {
   }
   damagePlayer(amount) { if (this.player.damage(amount)) this.round.checkEliminations(); this.hud.showDamage(); this.audio.event("hurt"); }
   spawnTracer(start,end,color) {
+    while (this.tracers.length >= MAX_TRACERS - 1) disposeObject3D(this.tracers.shift());
     const points = [start.clone(), end.clone()];
     const line = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints(points),
@@ -1568,12 +1632,14 @@ class Game {
     this.tracers.push(line, glow); this.scene.add(line, glow);
   }
   spawnSpark(pos,color) {
+    while (this.particles.length >= MAX_PARTICLES - 1) disposeObject3D(this.particles.shift());
     const s = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,6), new THREE.MeshBasicMaterial({ color, transparent:true, opacity:1 }));
     s.position.copy(pos); s.userData.life=0.18; s.userData.velocity=new THREE.Vector3(rand(-0.8,0.8),rand(0.45,1.2),rand(-0.8,0.8)); this.particles.push(s); this.scene.add(s);
     const light = new THREE.PointLight(color, 0.8, 3.2, 2);
     light.position.copy(pos); light.userData.life = 0.08; light.userData.maxLife = 0.08; light.userData.baseIntensity = light.intensity; this.particles.push(light); this.scene.add(light);
   }
   spawnImpact(pos) {
+    while (this.impacts.length >= MAX_IMPACTS - 1) disposeObject3D(this.impacts.shift());
     this.spawnSpark(pos,0xd8e0d0);
     const m = new THREE.Mesh(new THREE.SphereGeometry(0.035,6,4), new THREE.MeshBasicMaterial({ color:0x141815 }));
     m.position.copy(pos); m.userData.life=7; this.impacts.push(m); this.scene.add(m);
@@ -1582,17 +1648,17 @@ class Game {
   }
   spawnExplosion(pos) { for (let i=0;i<34;i++) this.spawnSpark(pos.clone().add(new THREE.Vector3(rand(-1,1),rand(0,1.2),rand(-1,1))), i%2?0xf3b45d:0xff5248); }
   updateEffects(dt) {
-    for (const l of this.tracers) { l.userData.life-=dt; l.material.opacity=Math.max(0,l.userData.life/0.055); if(l.userData.life<=0)this.scene.remove(l); } this.tracers=this.tracers.filter(l=>l.userData.life>0);
+    for (const l of this.tracers) { l.userData.life-=dt; l.material.opacity=Math.max(0,l.userData.life/0.055); if(l.userData.life<=0)disposeObject3D(l); } this.tracers=this.tracers.filter(l=>l.userData.life>0);
     for (const p of this.particles) {
       p.userData.life -= dt;
       if (p.userData.velocity) p.position.addScaledVector(p.userData.velocity, dt);
       if (p.scale?.multiplyScalar) p.scale.multiplyScalar(1 + dt * 5);
       if (p.material) p.material.opacity = Math.max(0, p.userData.life / (p.userData.maxLife || 0.18));
       if (p.isLight) p.intensity = Math.max(0, p.userData.life / (p.userData.maxLife || 0.08)) * (p.userData.baseIntensity || 0.8);
-      if (p.userData.life <= 0) this.scene.remove(p);
+      if (p.userData.life <= 0) disposeObject3D(p);
     }
     this.particles=this.particles.filter(p=>p.userData.life>0);
-    for (const m of this.impacts) { m.userData.life-=dt; if(m.userData.life<=0)this.scene.remove(m); } this.impacts=this.impacts.filter(m=>m.userData.life>0);
+    for (const m of this.impacts) { m.userData.life-=dt; if(m.userData.life<=0)disposeObject3D(m); } this.impacts=this.impacts.filter(m=>m.userData.life>0);
   }
   applyCameraShake(dt) { this.camera.position.set(0,0,0); if(this.cameraShake<=0)return; this.camera.position.x=rand(-this.cameraShake,this.cameraShake); this.camera.position.y=rand(-this.cameraShake,this.cameraShake)*0.5; this.cameraShake=Math.max(0,this.cameraShake-dt*0.55); }
   interact(dt) {
