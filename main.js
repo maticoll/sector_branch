@@ -125,8 +125,8 @@ const MAPS = [
     name: "Warehouse",
     modelUrl: ASSET_PATHS.maps.warehouse,
     theme: "warehouse",
-    attackerSpawn: new THREE.Vector3(-18, 1.65, 14),
-    defenderSpawn: new THREE.Vector3(18, 1.65, -14),
+    attackerSpawn: new THREE.Vector3(-20, 1.65, 20),
+    defenderSpawn: new THREE.Vector3(20, 1.65, -20),
     bombSites: { A: new THREE.Vector3(12, 0, -11), B: new THREE.Vector3(9, 0, 12) },
     bounds: { minX: -24, maxX: 24, minZ: -24, maxZ: 24 },
   },
@@ -1375,14 +1375,35 @@ class Game {
   }
   setupRound() {
     this.map.nextMap();
-    this.player.reset(this.map.current.attackerSpawn.clone());
+    const attackerSpawn = this.safeSpawn(this.map.current.attackerSpawn, 1.1).setY(this.player.height);
+    const defenderSpawn = this.safeSpawn(this.map.current.defenderSpawn, 1.1).setY(0);
+    this.player.reset(attackerSpawn.clone());
     this.weapons.resetInventory();
     this.clearTeams();
     this.teams.attackers.members.push(this.player);
     const allyFormation = [[-2.8, 7.2], [2.8, 7.2], [-5.4, 5.0], [5.4, 5.0]];
-    for (let i = 0; i < 4; i++) this.teams.attackers.members.push(new Bot(this, { id:`a${i}`, name:`Ally ${i+1}`, team:TEAM.ATTACKERS, position:this.map.current.attackerSpawn.clone().setY(0).add(new THREE.Vector3(allyFormation[i][0],0,allyFormation[i][1])), targetSite:i%2?"B":"A", weapon:WEAPONS.smg, state:BotState.FOLLOW_PLAYER }));
-    for (let i = 0; i < 5; i++) this.teams.defenders.members.push(new Bot(this, { id:`d${i}`, name:`Guard ${i+1}`, team:TEAM.DEFENDERS, position:this.map.current.defenderSpawn.clone().setY(0).add(new THREE.Vector3(rand(-3,3),0,rand(-3,3))), targetSite:i<3?"A":"B", weapon:WEAPONS.rifle, state:BotState.HOLD_POSITION }));
+    for (let i = 0; i < 4; i++) {
+      const desired = attackerSpawn.clone().setY(0).add(new THREE.Vector3(allyFormation[i][0],0,allyFormation[i][1]));
+      this.teams.attackers.members.push(new Bot(this, { id:`a${i}`, name:`Ally ${i+1}`, team:TEAM.ATTACKERS, position:this.safeSpawn(desired, 0.7), targetSite:i%2?"B":"A", weapon:WEAPONS.smg, state:BotState.FOLLOW_PLAYER }));
+    }
+    for (let i = 0; i < 5; i++) {
+      const desired = defenderSpawn.clone().add(new THREE.Vector3(rand(-3,3),0,rand(-3,3)));
+      this.teams.defenders.members.push(new Bot(this, { id:`d${i}`, name:`Guard ${i+1}`, team:TEAM.DEFENDERS, position:this.safeSpawn(desired, 0.7), targetSite:i<3?"A":"B", weapon:WEAPONS.rifle, state:BotState.HOLD_POSITION }));
+    }
     this.bomb.reset(this.player);
+  }
+  safeSpawn(origin, radius = 0.7) {
+    const base = origin.clone().setY(0);
+    const candidates = [[0,0],[0,3],[3,0],[-3,0],[0,-3],[3,3],[-3,3],[3,-3],[-3,-3],[0,6],[6,0],[-6,0],[0,-6],[6,6],[-6,6],[6,-6],[-6,-6]];
+    const b = this.map.current.bounds;
+    for (const [dx, dz] of candidates) {
+      const p = base.clone().add(new THREE.Vector3(dx, 0, dz));
+      p.x = clamp(p.x, b.minX + 1.4, b.maxX - 1.4);
+      p.z = clamp(p.z, b.minZ + 1.4, b.maxZ - 1.4);
+      if (!this.collision.collides(p.clone().setY(1.65), radius)) return p;
+    }
+    console.warn("No clear spawn found near", origin);
+    return base;
   }
   clearTeams() {
     [...(this.teams.attackers?.members || []), ...(this.teams.defenders?.members || [])].forEach((m) => { if (m instanceof Bot) this.scene.remove(m.group); });
