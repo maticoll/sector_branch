@@ -20,6 +20,27 @@ El prototipo Three.js sirve como referencia, pero el juego ya necesita cosas que
 3. Importar esta carpeta: `godot-sector-breach`.
 4. Ejecutar `scenes/main.tscn`.
 
+## Export web para Vercel
+
+El preset `Web` exporta a `godot-sector-breach/export/web/index.html`.
+
+Comando local:
+
+```powershell
+godot --headless --path . --export-release Web export/web/index.html
+```
+
+Para Vercel, configurar el proyecto apuntando a la carpeta exportada versionada:
+
+- Root/output estático: `godot-sector-breach/export/web`
+- Framework: Other
+- Build command: vacío si el export ya está generado localmente
+- Output directory: `.`
+
+`vercel.json` incluye headers COOP/COEP para builds WebAssembly de Godot.
+
+Nota: Godot 4 Web requiere WebGL2. Si un navegador embebido muestra `WebGL2 missing`, probar en Chrome/Edge normal o revisar aceleracion por hardware.
+
 ## Estado actual
 
 - Escena principal inicial.

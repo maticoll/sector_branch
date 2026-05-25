@@ -24,7 +24,7 @@ func switch_slot(slot: int) -> void:
 	_build_viewmodel()
 
 func fire(camera: Camera3D) -> void:
-	var weapon := weapons[active_slot]
+	var weapon: Dictionary = weapons[active_slot]
 	if cooldown > 0.0 or reloading:
 		return
 	if weapon["ammo"] <= 0:
@@ -42,7 +42,7 @@ func fire(camera: Camera3D) -> void:
 		hit["collider"].take_damage(weapon["damage"])
 
 func reload() -> void:
-	var weapon := weapons[active_slot]
+	var weapon: Dictionary = weapons[active_slot]
 	if weapon["ammo"] >= weapon["mag"] or weapon["reserve"] <= 0:
 		return
 	var needed: int = weapon["mag"] - weapon["ammo"]
@@ -54,7 +54,7 @@ func reload() -> void:
 func _build_viewmodel() -> void:
 	if weapon_mesh:
 		weapon_mesh.queue_free()
-	var weapon := weapons[active_slot]
+	var weapon: Dictionary = weapons[active_slot]
 	weapon_mesh = Node3D.new()
 	weapon_mesh.position = Vector3(0.35, -0.28, -0.75)
 	add_child(weapon_mesh)
