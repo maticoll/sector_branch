@@ -973,7 +973,7 @@ class Bot {
     this.moveToward(target, 2.45, dt);
   }
   updateDefender(dt) {
-    if (this.game.bomb.state === BombState.PLANTED) {
+    if ([BombState.PLANTED, BombState.DEFUSING].includes(this.game.bomb.state)) {
       this.state = BotState.ROTATE_TO_BOMB;
       if (this.game.bomb.distanceXZ(this.position, this.game.bomb.position) < 1.8) {
         this.state = BotState.DEFUSE_BOMB;
@@ -1099,7 +1099,7 @@ class Bomb {
     this.state = BombState.PLANTING;
     this.plantProgress += dt;
     if (this.plantProgress >= 3) {
-      this.state = BombState.PLANTED; this.carrier = null; this.position.copy(actor.position); this.plantedSite = this.siteAt(actor.position); this.timeToExplosion = 35; this.plantProgress = 0; this.game.round.onBombPlanted(); this.game.audio.event("plant");
+      this.state = BombState.PLANTED; this.carrier = null; this.position.copy(actor.position).setY(0.1); this.plantedSite = this.siteAt(actor.position); this.timeToExplosion = 35; this.plantProgress = 0; this.game.round.onBombPlanted(); this.game.audio.event("plant");
     }
   }
   defuseBy(actor, dt) {
@@ -1358,7 +1358,7 @@ class Minimap {
     for (const [name, site] of Object.entries(this.game.map.current.bombSites)) { const p = this.worldToMap(site); ctx.fillStyle = name === "A" ? "#f3b45d" : "#7dd9d2"; ctx.font = "bold 18px Trebuchet MS"; ctx.fillText(name, p.x - 6, p.y + 6); }
     this.game.teams.attackers.members.forEach((m) => { if (m.alive && m !== this.game.player) this.drawDot(m.position, "#67b7ff", 3.5); });
     this.game.teams.defenders.members.forEach((m) => { if (m.alive && (m.detectedTimer > 0 || this.game.bomb.state === BombState.PLANTED)) this.drawDot(m.position, "#ff5248", 3.5); });
-    if ([BombState.DROPPED, BombState.PLANTED].includes(this.game.bomb.state)) this.drawDot(this.game.bomb.position, "#f3b45d", 5);
+    if ([BombState.DROPPED, BombState.PLANTED, BombState.DEFUSING].includes(this.game.bomb.state)) this.drawDot(this.game.bomb.position, "#f3b45d", 5);
     const p = this.worldToMap(this.game.player.position); ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(-this.game.player.yawObject.rotation.y); ctx.fillStyle = "#edf3e9"; ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(6,6); ctx.lineTo(-6,6); ctx.closePath(); ctx.fill(); ctx.restore();
   }
 }
@@ -1563,7 +1563,7 @@ class Game {
     const s = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,6), new THREE.MeshBasicMaterial({ color, transparent:true, opacity:1 }));
     s.position.copy(pos); s.userData.life=0.18; s.userData.velocity=new THREE.Vector3(rand(-0.8,0.8),rand(0.45,1.2),rand(-0.8,0.8)); this.particles.push(s); this.scene.add(s);
     const light = new THREE.PointLight(color, 0.8, 3.2, 2);
-    light.position.copy(pos); light.userData.life = 0.08; this.particles.push(light); this.scene.add(light);
+    light.position.copy(pos); light.userData.life = 0.08; light.userData.maxLife = 0.08; light.userData.baseIntensity = light.intensity; this.particles.push(light); this.scene.add(light);
   }
   spawnImpact(pos) {
     this.spawnSpark(pos,0xd8e0d0);
@@ -1575,7 +1575,15 @@ class Game {
   spawnExplosion(pos) { for (let i=0;i<34;i++) this.spawnSpark(pos.clone().add(new THREE.Vector3(rand(-1,1),rand(0,1.2),rand(-1,1))), i%2?0xf3b45d:0xff5248); }
   updateEffects(dt) {
     for (const l of this.tracers) { l.userData.life-=dt; l.material.opacity=Math.max(0,l.userData.life/0.055); if(l.userData.life<=0)this.scene.remove(l); } this.tracers=this.tracers.filter(l=>l.userData.life>0);
-    for (const p of this.particles) { p.userData.life-=dt; p.position.addScaledVector(p.userData.velocity,dt); p.scale.multiplyScalar(1+dt*5); p.material.opacity=Math.max(0,p.userData.life/0.18); if(p.userData.life<=0)this.scene.remove(p); } this.particles=this.particles.filter(p=>p.userData.life>0);
+    for (const p of this.particles) {
+      p.userData.life -= dt;
+      if (p.userData.velocity) p.position.addScaledVector(p.userData.velocity, dt);
+      if (p.scale?.multiplyScalar) p.scale.multiplyScalar(1 + dt * 5);
+      if (p.material) p.material.opacity = Math.max(0, p.userData.life / (p.userData.maxLife || 0.18));
+      if (p.isLight) p.intensity = Math.max(0, p.userData.life / (p.userData.maxLife || 0.08)) * (p.userData.baseIntensity || 0.8);
+      if (p.userData.life <= 0) this.scene.remove(p);
+    }
+    this.particles=this.particles.filter(p=>p.userData.life>0);
     for (const m of this.impacts) { m.userData.life-=dt; if(m.userData.life<=0)this.scene.remove(m); } this.impacts=this.impacts.filter(m=>m.userData.life>0);
   }
   applyCameraShake(dt) { this.camera.position.set(0,0,0); if(this.cameraShake<=0)return; this.camera.position.x=rand(-this.cameraShake,this.cameraShake); this.camera.position.y=rand(-this.cameraShake,this.cameraShake)*0.5; this.cameraShake=Math.max(0,this.cameraShake-dt*0.55); }
