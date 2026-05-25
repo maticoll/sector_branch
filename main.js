@@ -1071,9 +1071,9 @@ class Bomb {
   }
   update(dt) {
     if (this.carrier && this.state === BombState.CARRIED) this.position.copy(this.carrier.position);
-    if (this.state === BombState.DROPPED || this.state === BombState.PLANTED) { this.mesh.visible = true; this.mesh.position.copy(this.position).setY(0.16); this.mesh.rotation.y += dt; }
+    if (this.state === BombState.DROPPED || this.state === BombState.PLANTED || this.state === BombState.DEFUSING) { this.mesh.visible = true; this.mesh.position.copy(this.position).setY(0.16); this.mesh.rotation.y += dt; }
     else this.mesh.visible = false;
-    if (this.state === BombState.PLANTED) {
+    if (this.state === BombState.PLANTED || this.state === BombState.DEFUSING) {
       this.timeToExplosion -= dt;
       this.beepTimer -= dt;
       const interval = clamp(this.timeToExplosion / 35, 0.12, 0.8);
@@ -1120,8 +1120,8 @@ class Bomb {
       this.state = BombState.CARRIED;
       this.plantProgress = Math.max(0, this.plantProgress - dt * 2);
     }
-    if (this.state === BombState.DEFUSING) this.state = BombState.PLANTED;
-    if (!this.defuseTouched && this.state === BombState.PLANTED) {
+    if (this.state === BombState.DEFUSING && !this.defuseTouched) this.state = BombState.PLANTED;
+    if (!this.defuseTouched && [BombState.PLANTED, BombState.DEFUSING].includes(this.state)) {
       this.defuseProgress = Math.max(0, this.defuseProgress - dt * 1.6);
     }
   }
@@ -1254,10 +1254,12 @@ class MapManager {
       });
       sign.position.copy(pos).set(pos.x, 2.2, pos.z - 1.8);
       this.mapRoot.add(sign);
+      this.cylinder(pos.x - 0.7, 1.05, pos.z - 1.8, 0.045, 2.1, trimMat, false, "siteSignPost");
+      this.cylinder(pos.x + 0.7, 1.05, pos.z - 1.8, 0.045, 2.1, trimMat, false, "siteSignPost");
     }
     for (const [x,z,c] of [[-14,-18,0xb6f45a],[14,-18,0xf3b45d],[0,12,0x7dd9d2],[-18,8,0x9ab4ff],[18,-8,0xff8668]]) {
       const l = new THREE.PointLight(c, 1.35, 11, 2); l.position.set(x,3.2,z); this.mapRoot.add(l);
-      this.cylinder(x, 3.05, z, 0.08, 3.4, trimMat, false, "lightPole");
+      this.cylinder(x, 1.7, z, 0.08, 3.4, trimMat, false, "lightPole");
       this.box(x, 3.2, z, 0.6, 0.12, 0.35, makeStdMaterial(c, { emissive: c, emissiveIntensity: 0.55, roughness: 0.35 }), false, "lamp");
     }
   }
@@ -1268,7 +1270,7 @@ class MapManager {
       this.box(x, 3.8 + h, z, w + 0.5, 0.18, d + 0.5, roofMat, false, "roofTrim");
     }
     for (const [x,z] of [[-23,-8],[-23,6],[23,22],[16,-23],[-12,23]]) {
-      this.cylinder(x, 2.6, z, 0.12, 4.6, trimMat, false, "mast");
+      this.cylinder(x, 2.3, z, 0.12, 4.6, trimMat, false, "mast");
       this.box(x, 4.95, z, 0.9, 0.12, 0.18, trimMat, false, "mastCross");
     }
   }
@@ -1328,6 +1330,10 @@ class RoundManager {
   checkEliminations() {
     if (this.endLock || [RoundState.MENU, RoundState.BUY_PHASE].includes(this.state)) return;
     const atk = this.game.alive(TEAM.ATTACKERS), def = this.game.alive(TEAM.DEFENDERS);
+    if (this.state === RoundState.BOMB_PLANTED) {
+      if (def === 0) this.finish(TEAM.ATTACKERS, "Defensores eliminados. La carga queda asegurada.");
+      return;
+    }
     if (def === 0) this.finish(TEAM.ATTACKERS, "Defensores eliminados.");
     else if (atk === 0) this.finish(TEAM.DEFENDERS, "Atacantes eliminados.");
   }
