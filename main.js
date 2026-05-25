@@ -535,10 +535,14 @@ class InputManager {
   }
 
   bind() {
+    const gameplayKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "Space", "ControlLeft", "ControlRight", "ShiftLeft", "ShiftRight", "Tab", "KeyE", "KeyR", "KeyB", "F3", "Digit1", "Digit2"]);
     window.addEventListener("keydown", (e) => {
+      if (gameplayKeys.has(e.code)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       this.keys.add(e.code);
-      if (["Space", "ControlLeft", "Tab", "F3"].includes(e.code)) e.preventDefault();
-      if (e.code === "KeyR") this.game.weapons.reload();
+      if (e.code === "KeyR" && [RoundState.PLAYING, RoundState.BOMB_PLANTED].includes(this.game.round.state)) this.game.weapons.reload();
       if (e.code === "KeyB") this.game.toggleBuyPanel();
       if (e.code === "KeyE") this.game.interactHeld = true;
       if (e.code === "Tab") this.scoreboard = true;
@@ -546,6 +550,10 @@ class InputManager {
       if (/^Digit[1-2]$/.test(e.code)) this.game.handleWeaponHotkey(e.code.replace("Digit", ""));
     });
     window.addEventListener("keyup", (e) => {
+      if (gameplayKeys.has(e.code)) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       this.keys.delete(e.code);
       if (e.code === "KeyE") this.game.interactHeld = false;
       if (e.code === "Tab") this.scoreboard = false;
