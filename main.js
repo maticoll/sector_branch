@@ -6,6 +6,7 @@ import { RGBELoader } from "three/examples/jsm/loaders/RGBELoader.js";
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const USE_OPTIONAL_ASSET_FILES = false;
 
 const RoundState = {
   MENU: "MENU",
@@ -222,6 +223,30 @@ function addDetailLines(parent, mesh, color = 0x101412, opacity = 0.45) {
   return edges;
 }
 
+function makeCanvasSprite(text, options = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.width = options.width || 512;
+  canvas.height = options.height || 256;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = options.background || "rgba(4,10,9,0.72)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = options.border || "rgba(125,217,210,0.45)";
+  ctx.lineWidth = 10;
+  ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+  ctx.fillStyle = options.color || "#edf3e9";
+  ctx.font = options.font || "bold 132px Georgia, serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 6);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(options.scaleX || 3.2, options.scaleY || 1.6, 1);
+  return sprite;
+}
+
 class AssetManager {
   constructor() {
     this.gltf = new GLTFLoader();
@@ -234,8 +259,11 @@ class AssetManager {
   }
 
   async loadModel(url, fallbackFactory, onReady) {
+    if (!USE_OPTIONAL_ASSET_FILES) {
+      onReady(fallbackFactory());
+      return;
+    }
     if (!url) {
-      console.warn("Model URL missing, using fallback.");
       onReady(fallbackFactory());
       return;
     }
@@ -243,12 +271,12 @@ class AssetManager {
       const response = await fetch(url, { method: "HEAD" });
       const type = response.headers.get("content-type") || "";
       if (!response.ok || type.includes("text/html")) {
-        console.warn(`Model ${url} not found; using fallback.`);
+        console.info(`Optional model ${url} not found; using procedural fallback.`);
         onReady(fallbackFactory());
         return;
       }
     } catch (error) {
-      console.warn(`Could not check model ${url}; using fallback.`, error);
+      console.info(`Optional model ${url} unavailable; using procedural fallback.`, error);
       onReady(fallbackFactory());
       return;
     }
@@ -262,18 +290,19 @@ class AssetManager {
       });
       onReady(model);
     }, undefined, (error) => {
-      console.warn(`Could not load model ${url}; using fallback.`, error);
+      console.info(`Optional model ${url} could not be loaded; using procedural fallback.`, error);
       onReady(fallbackFactory());
     });
   }
 
   loadSound(key, url) {
+    if (!USE_OPTIONAL_ASSET_FILES) return;
     if (!url) return;
     const audio = new Audio();
     audio.src = url;
     audio.preload = "auto";
     audio.addEventListener("canplaythrough", () => this.audio.set(key, audio), { once: true });
-    audio.addEventListener("error", () => console.warn(`Could not load sound ${url}; using procedural fallback.`), { once: true });
+    audio.addEventListener("error", () => console.info(`Optional sound ${url} not found; using procedural fallback.`), { once: true });
     audio.load();
   }
 
@@ -1078,7 +1107,7 @@ class Bomb {
 }
 
 class MapManager {
-  constructor(game) { this.game = game; this.index = -1; this.current = MAPS[0]; this.mapRoot = new THREE.Group(); game.scene.add(this.mapRoot); this.coverPoints = []; }
+  constructor(game) { this.game = game; this.index = -1; this.current = MAPS[0]; this.mapRoot = new THREE.Group(); game.scene.add(this.mapRoot); this.coverPoints = []; this.sky = null; }
   nextMap() {
     this.index = (this.index + 1) % MAPS.length;
     this.current = MAPS[this.index];
@@ -1086,16 +1115,45 @@ class MapManager {
   }
   build() {
     this.mapRoot.clear(); this.coverPoints = []; this.game.collision.clear();
-    this.game.scene.background = new THREE.Color(this.current.theme === "desert" ? 0xc7ad7f : 0x101512);
-    this.game.scene.fog = new THREE.Fog(this.current.theme === "desert" ? 0xc7ad7f : 0x101512, 22, 62);
+    if (this.sky) this.game.scene.remove(this.sky);
+    this.game.scene.background = new THREE.Color(this.current.theme === "desert" ? 0xbda375 : 0x0b1210);
+    this.game.scene.fog = new THREE.Fog(this.current.theme === "desert" ? 0xbda375 : 0x0b1210, 20, 68);
+    this.sky = this.createSky();
+    this.game.scene.add(this.sky);
     this.buildProcedural();
-    this.game.assets.loadModel(this.current.modelUrl, () => new THREE.Group(), (model) => {
-      if (model.children.length === 0) return;
-      model.name = "ExternalMap";
-      model.position.set(0, 0, 0);
-      this.mapRoot.add(model);
-      console.warn("External map loaded. Manual colliders from JS are still used for gameplay.");
+    if (this.current.modelUrl) {
+      this.game.assets.loadModel(this.current.modelUrl, () => new THREE.Group(), (model) => {
+        if (model.children.length === 0) return;
+        model.name = "ExternalMap";
+        model.position.set(0, 0, 0);
+        this.mapRoot.add(model);
+        console.info("External map loaded. Manual colliders from JS are still used for gameplay.");
+      });
+    }
+  }
+  createSky() {
+    const top = this.current.theme === "desert" ? "#9fb1bd" : "#07100f";
+    const bottom = this.current.theme === "desert" ? "#d8bd88" : "#16211d";
+    const tex = makeTexture(512, (ctx, w, h) => {
+      const grad = ctx.createLinearGradient(0, 0, 0, h);
+      grad.addColorStop(0, top);
+      grad.addColorStop(0.62, bottom);
+      grad.addColorStop(1, this.current.theme === "desert" ? "#a48658" : "#050807");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+      if (this.current.theme !== "desert") {
+        for (let i = 0; i < 160; i++) {
+          ctx.fillStyle = `rgba(180,230,220,${rand(0.08,0.28)})`;
+          ctx.fillRect(Math.random() * w, Math.random() * h * 0.5, rand(1, 2), rand(1, 2));
+        }
+      }
     });
+    const sky = new THREE.Mesh(
+      new THREE.SphereGeometry(84, 32, 16),
+      new THREE.MeshBasicMaterial({ map: tex, side: THREE.BackSide, fog: false })
+    );
+    sky.name = "Atmosphere";
+    return sky;
   }
   mat(kind) {
     const base = this.current.theme === "desert" ? "#8f7854" : kind === "metal" ? "#53646a" : kind === "floor" ? "#313833" : "#3f463e";
@@ -1108,12 +1166,20 @@ class MapManager {
     const trimMat = makeStdMaterial(0x161d1b, { roughness: 0.58, metalness: 0.38 });
     const hazardMat = makeStdMaterial(0xe0a13a, { roughness: 0.72, metalness: 0.08 });
     const glassMat = makeStdMaterial(0x75cfd0, { roughness: 0.24, metalness: 0.18, emissive: 0x123434, emissiveIntensity: 0.16 });
+    const asphaltMat = makeStdMaterial(this.current.theme === "desert" ? 0x746647 : 0x202923, { roughness: 0.88, metalness: 0.02 });
     this.box(0, -0.13, 0, 52, 0.25, 52, floorMat, false, "floor");
+    this.box(-7, -0.08, 0, 6.5, 0.035, 47, asphaltMat, false, "mainLane");
+    this.box(9, -0.075, 4, 5.5, 0.035, 37, asphaltMat, false, "serviceLane");
     for (let i = -20; i <= 20; i += 5) {
       this.box(i, 0.012, 0, 0.045, 0.03, 50, trimMat, false, "floorGridX");
       this.box(0, 0.015, i, 50, 0.03, 0.045, trimMat, false, "floorGridZ");
     }
+    for (const z of [-20,-14,-8,-2,4,10,16]) {
+      this.box(-7, 0.01, z, 0.16, 0.04, 2.1, hazardMat, false, "laneMark");
+      this.box(9, 0.012, z + 2, 0.12, 0.04, 1.5, glassMat, false, "laneMarkBlue");
+    }
     this.box(0, 1.9, -26, 52, 3.8, 0.8, wallMat, true, "northWall"); this.box(0, 1.9, 26, 52, 3.8, 0.8, wallMat, true, "southWall"); this.box(-26, 1.9, 0, 0.8, 3.8, 52, wallMat, true, "westWall"); this.box(26, 1.9, 0, 0.8, 3.8, 52, wallMat, true, "eastWall");
+    this.addPerimeterSilhouette(wallMat, trimMat);
     for (const [x,z,r] of [[-22,-22,0],[22,-22,0],[22,22,0],[-22,22,0]]) {
       this.box(x, 3.0, z, 2.4, 2.2, 2.4, metalMat, true, "cornerTower");
       this.box(x, 4.25, z, 3.0, 0.14, 3.0, trimMat, false, "towerCap");
@@ -1144,11 +1210,32 @@ class MapManager {
       this.box(pos.x, 0.08, pos.z, 3.6, 0.08, 3.6, name === "A" ? hazardMat : glassMat, false, `site${name}`);
       const label = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.08, 0.75), new THREE.MeshBasicMaterial({ color: name === "A" ? 0xf3b45d : 0x7dd9d2 }));
       label.position.copy(pos).setY(0.16); this.mapRoot.add(label);
+      const sign = makeCanvasSprite(name, {
+        color: name === "A" ? "#f3b45d" : "#7dd9d2",
+        border: name === "A" ? "rgba(243,180,93,0.55)" : "rgba(125,217,210,0.55)",
+        background: "rgba(5,10,9,0.68)",
+        scaleX: 1.35,
+        scaleY: 0.75,
+        font: "bold 138px Georgia, serif",
+      });
+      sign.position.copy(pos).set(pos.x, 2.2, pos.z - 1.8);
+      this.mapRoot.add(sign);
     }
     for (const [x,z,c] of [[-14,-18,0xb6f45a],[14,-18,0xf3b45d],[0,12,0x7dd9d2],[-18,8,0x9ab4ff],[18,-8,0xff8668]]) {
       const l = new THREE.PointLight(c, 1.35, 11, 2); l.position.set(x,3.2,z); this.mapRoot.add(l);
       this.cylinder(x, 3.05, z, 0.08, 3.4, trimMat, false, "lightPole");
       this.box(x, 3.2, z, 0.6, 0.12, 0.35, makeStdMaterial(c, { emissive: c, emissiveIntensity: 0.55, roughness: 0.35 }), false, "lamp");
+    }
+  }
+  addPerimeterSilhouette(wallMat, trimMat) {
+    const roofMat = makeStdMaterial(this.current.theme === "desert" ? 0x6f5b3e : 0x111917, { roughness: 0.78, metalness: 0.1 });
+    for (const [x,z,w,d,h] of [[-18,-24,8,2.2,2.4],[-5,-24,10,2.2,3.1],[9,-24,7,2.2,2.1],[20,-24,5,2.2,3.5],[-21,20,4,8,2.4],[24,-8,2.2,9,2.9],[24,12,2.2,6,2.2]]) {
+      this.box(x, 3.8 + h / 2, z, w, h, d, wallMat, false, "backgroundBuilding");
+      this.box(x, 3.8 + h, z, w + 0.5, 0.18, d + 0.5, roofMat, false, "roofTrim");
+    }
+    for (const [x,z] of [[-23,-8],[-23,6],[23,22],[16,-23],[-12,23]]) {
+      this.cylinder(x, 2.6, z, 0.12, 4.6, trimMat, false, "mast");
+      this.box(x, 4.95, z, 0.9, 0.12, 0.18, trimMat, false, "mastCross");
     }
   }
   box(x,y,z,w,h,d,mat,collide=true,name="box") {
@@ -1244,6 +1331,7 @@ class Game {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.8)); this.renderer.setSize(innerWidth, innerHeight);
     this.renderer.shadowMap.enabled = true; this.renderer.shadowMap.type = THREE.PCFSoftShadowMap; this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1; this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.setClearColor(0x08100e, 1);
     this.root.appendChild(this.renderer.domElement);
     this.assets = new AssetManager();
     Object.entries(ASSET_PATHS.sounds).forEach(([k,u]) => this.assets.loadSound(k,u));
@@ -1270,8 +1358,16 @@ class Game {
     this.animate();
   }
   setupLights() {
-    this.scene.add(new THREE.HemisphereLight(0xc9d5c3, 0x252b24, 1.5));
-    const sun = new THREE.DirectionalLight(0xf1ead3, 2.2); sun.position.set(-8,18,9); sun.castShadow = true; sun.shadow.mapSize.set(2048,2048); sun.shadow.camera.left=-30; sun.shadow.camera.right=30; sun.shadow.camera.top=30; sun.shadow.camera.bottom=-30; this.scene.add(sun);
+    this.scene.add(new THREE.HemisphereLight(0xc9d5c3, 0x19231f, 1.35));
+    const sun = new THREE.DirectionalLight(0xf1ead3, 2.4);
+    sun.position.set(-10,20,12);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048,2048);
+    sun.shadow.camera.left=-34; sun.shadow.camera.right=34; sun.shadow.camera.top=34; sun.shadow.camera.bottom=-34; sun.shadow.camera.near=1; sun.shadow.camera.far=70;
+    this.scene.add(sun);
+    const coolFill = new THREE.DirectionalLight(0x72b9c8, 0.45);
+    coolFill.position.set(12, 8, -14);
+    this.scene.add(coolFill);
   }
   lockPointerAndStart() {
     this.audio.resume(); this.hud.hideStart(); if (this.round.state === RoundState.MENU) this.round.startFirstRound();
@@ -1360,9 +1456,32 @@ class Game {
     return best;
   }
   damagePlayer(amount) { if (this.player.damage(amount)) this.round.checkEliminations(); this.hud.showDamage(); this.audio.event("hurt"); }
-  spawnTracer(start,end,color) { const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([start.clone(),end.clone()]), new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.8 })); line.userData.life=0.055; this.tracers.push(line); this.scene.add(line); }
-  spawnSpark(pos,color) { const s = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,6), new THREE.MeshBasicMaterial({ color, transparent:true, opacity:1 })); s.position.copy(pos); s.userData.life=0.18; s.userData.velocity=new THREE.Vector3(rand(-0.8,0.8),rand(0.45,1.2),rand(-0.8,0.8)); this.particles.push(s); this.scene.add(s); }
-  spawnImpact(pos) { this.spawnSpark(pos,0xd8e0d0); const m = new THREE.Mesh(new THREE.SphereGeometry(0.035,6,4), new THREE.MeshBasicMaterial({ color:0x141815 })); m.position.copy(pos); m.userData.life=7; this.impacts.push(m); this.scene.add(m); }
+  spawnTracer(start,end,color) {
+    const points = [start.clone(), end.clone()];
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.86 })
+    );
+    const glow = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineBasicMaterial({ color:0xfff1b2, transparent:true, opacity:0.32 })
+    );
+    line.userData.life=0.055; glow.userData.life=0.035;
+    this.tracers.push(line, glow); this.scene.add(line, glow);
+  }
+  spawnSpark(pos,color) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(0.06,8,6), new THREE.MeshBasicMaterial({ color, transparent:true, opacity:1 }));
+    s.position.copy(pos); s.userData.life=0.18; s.userData.velocity=new THREE.Vector3(rand(-0.8,0.8),rand(0.45,1.2),rand(-0.8,0.8)); this.particles.push(s); this.scene.add(s);
+    const light = new THREE.PointLight(color, 0.8, 3.2, 2);
+    light.position.copy(pos); light.userData.life = 0.08; this.particles.push(light); this.scene.add(light);
+  }
+  spawnImpact(pos) {
+    this.spawnSpark(pos,0xd8e0d0);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.035,6,4), new THREE.MeshBasicMaterial({ color:0x141815 }));
+    m.position.copy(pos); m.userData.life=7; this.impacts.push(m); this.scene.add(m);
+    const scorch = new THREE.Mesh(new THREE.RingGeometry(0.05, 0.11, 10), new THREE.MeshBasicMaterial({ color:0x090c0a, transparent:true, opacity:0.7, side:THREE.DoubleSide }));
+    scorch.position.copy(pos); scorch.lookAt(this.getCameraWorldPosition()); scorch.userData.life=6; this.impacts.push(scorch); this.scene.add(scorch);
+  }
   spawnExplosion(pos) { for (let i=0;i<34;i++) this.spawnSpark(pos.clone().add(new THREE.Vector3(rand(-1,1),rand(0,1.2),rand(-1,1))), i%2?0xf3b45d:0xff5248); }
   updateEffects(dt) {
     for (const l of this.tracers) { l.userData.life-=dt; l.material.opacity=Math.max(0,l.userData.life/0.055); if(l.userData.life<=0)this.scene.remove(l); } this.tracers=this.tracers.filter(l=>l.userData.life>0);
