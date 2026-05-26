@@ -56,29 +56,48 @@ func _build_viewmodel() -> void:
 		weapon_mesh.queue_free()
 	var weapon: Dictionary = weapons[active_slot]
 	weapon_mesh = Node3D.new()
-	weapon_mesh.position = Vector3(0.35, -0.28, -0.75)
+	weapon_mesh.position = Vector3(0.42, -0.36, -0.92)
+	weapon_mesh.rotation_degrees = Vector3(-2, -4, 0)
 	add_child(weapon_mesh)
-	var body := MeshInstance3D.new()
-	body.mesh = BoxMesh.new()
-	body.mesh.size = Vector3(0.22, 0.16, 0.75 if active_slot == 1 else 0.42)
-	body.material_override = _skin_material(weapon["skin"])
-	weapon_mesh.add_child(body)
-	var barrel := MeshInstance3D.new()
-	barrel.mesh = CylinderMesh.new()
-	barrel.mesh.top_radius = 0.035
-	barrel.mesh.bottom_radius = 0.035
-	barrel.mesh.height = 0.55 if active_slot == 1 else 0.32
-	barrel.rotation_degrees.x = 90
-	barrel.position.z = -0.42
-	barrel.material_override = _metal_material()
-	weapon_mesh.add_child(barrel)
-	var grip := MeshInstance3D.new()
-	grip.mesh = BoxMesh.new()
-	grip.mesh.size = Vector3(0.13, 0.34, 0.15)
-	grip.position = Vector3(0.02, -0.23, 0.1)
-	grip.rotation_degrees.x = -12
-	grip.material_override = _metal_material(Color("#0a0d0e"))
-	weapon_mesh.add_child(grip)
+	var long := active_slot == 1
+	_part_box("Receiver", Vector3(0, 0.02, -0.1), Vector3(0.18, 0.12, 0.64 if long else 0.34), _skin_material(weapon["skin"]))
+	_part_box("Stock", Vector3(0, 0.01, 0.28 if long else 0.12), Vector3(0.16, 0.11, 0.22), _metal_material(Color("#202827")))
+	_part_box("TopRail", Vector3(0, 0.11, -0.1), Vector3(0.14, 0.035, 0.58 if long else 0.28), _metal_material(Color("#090c0d")))
+	_part_box("Grip", Vector3(0.015, -0.17, 0.08), Vector3(0.105, 0.28, 0.11), _metal_material(Color("#080b0c")), Vector3(-13, 0, 0))
+	_part_box("Magazine", Vector3(0, -0.16, -0.14), Vector3(0.12, 0.27 if long else 0.18, 0.12), _metal_material(Color("#111617")), Vector3(5, 0, 0))
+	_part_cylinder("Barrel", Vector3(0, 0.035, -0.47 if long else -0.29), 0.024, 0.44 if long else 0.26, _metal_material(Color("#0d1112")), Vector3(90, 0, 0))
+	if long:
+		_part_cylinder("Muzzle", Vector3(0, 0.035, -0.72), 0.032, 0.16, _metal_material(Color("#060808")), Vector3(90, 0, 0))
+		_part_cylinder("Optic", Vector3(0, 0.19, -0.16), 0.055, 0.2, _metal_material(Color("#111617")), Vector3(0, 0, 90))
+	else:
+		_part_box("FrontSight", Vector3(0, 0.15, -0.25), Vector3(0.04, 0.045, 0.035), _metal_material(Color("#0a0d0e")))
+
+func _part_box(name: String, position: Vector3, size: Vector3, material: StandardMaterial3D, rotation := Vector3.ZERO) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.name = name
+	mesh.mesh = BoxMesh.new()
+	mesh.mesh.size = size
+	mesh.position = position
+	mesh.rotation_degrees = rotation
+	mesh.material_override = material
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	weapon_mesh.add_child(mesh)
+	return mesh
+
+func _part_cylinder(name: String, position: Vector3, radius: float, height: float, material: StandardMaterial3D, rotation := Vector3.ZERO) -> MeshInstance3D:
+	var mesh := MeshInstance3D.new()
+	mesh.name = name
+	mesh.mesh = CylinderMesh.new()
+	mesh.mesh.top_radius = radius
+	mesh.mesh.bottom_radius = radius
+	mesh.mesh.height = height
+	mesh.mesh.radial_segments = 18
+	mesh.position = position
+	mesh.rotation_degrees = rotation
+	mesh.material_override = material
+	mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	weapon_mesh.add_child(mesh)
+	return mesh
 
 func _skin_material(color: Color) -> StandardMaterial3D:
 	var mat := StandardMaterial3D.new()

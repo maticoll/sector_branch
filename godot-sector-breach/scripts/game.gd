@@ -15,6 +15,7 @@ var phase := "BUY"
 
 func _ready() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_configure_environment()
 	_build_level()
 	_spawn_player()
 	_spawn_bots()
@@ -39,6 +40,18 @@ func _build_level() -> void:
 	map_builder.name = "BlockoutMap"
 	add_child(map_builder)
 	map_builder.build_desert_outpost()
+
+func _configure_environment() -> void:
+	var env := Environment.new()
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color("#1a2622")
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	env.ambient_light_color = Color("#b9c8ba")
+	env.ambient_light_energy = 0.72
+	env.fog_enabled = true
+	env.fog_light_color = Color("#8c9b89")
+	env.fog_density = 0.018
+	$WorldEnvironment.environment = env
 
 func _spawn_player() -> void:
 	player = PlayerController.new()
