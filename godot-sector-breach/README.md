@@ -32,7 +32,8 @@ godot --headless --path . --export-release Web export/web/index.html
 
 Para Vercel, configurar el proyecto apuntando a la carpeta exportada versionada:
 
-- Root/output estático: `godot-sector-breach/export/web`
+- Si usas la configuracion raiz del repo: dejar Root Directory en blanco y Vercel usa `vercel.json`.
+- Si preferis configurar manualmente: Root Directory `godot-sector-breach/export/web`.
 - Framework: Other
 - Build command: vacío si el export ya está generado localmente
 - Output directory: `.`
